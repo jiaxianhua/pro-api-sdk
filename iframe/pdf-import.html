@@ -317,7 +317,12 @@
             console.log('[PDF Import] pdf.js library found, version:', pdfjsLib.version);
 
             console.log('[PDF Import] Loading PDF document...');
-            const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+            const loadingTask = pdfjsLib.getDocument({
+                data: arrayBuffer,
+                // Enable standard font support for better Chinese rendering
+                useSystemFonts: false,
+                standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.9.155/standard_fonts/'
+            });
             const pdf = await loadingTask.promise;
             console.log('[PDF Import] PDF loaded, pages:', pdf.numPages);
 
@@ -340,7 +345,9 @@
             let currentPoint = { x: 0, y: 0 };
 
             // Scale factor: convert PDF points to schematic units
-            const scale = 10; // 1 PDF point = 10 schematic units (adjustable)
+            // A4 paper: 871.92 x 623.52 points (landscape)
+            // Target schematic size: ~1000 x 750 units
+            const scale = 1.2; // Slightly smaller for better fit
 
             // Track operator statistics for debugging
             const opStats = {};
@@ -522,8 +529,9 @@
         function transformCoordinates(pdfX, pdfY, pageHeight, scale = 1) {
             // PDF: bottom-left origin, Y-axis up
             // Schematic: top-left origin, Y-axis down
-            const schX = pdfX * scale;
-            const schY = pdfY * scale;  // Don't flip Y - keep same orientation
+            // Round to 2 decimal places to avoid floating point issues
+            const schX = Math.round(pdfX * scale * 100) / 100;
+            const schY = Math.round(pdfY * scale * 100) / 100;
             return { x: schX, y: schY };
         }
 
@@ -545,24 +553,55 @@
                             console.error('[PDF Import] sch_PrimitiveRectangle API not available');
                             return;
                         }
+                        // Skip rectangles that are too large (likely page borders)
+                        if (primData.width > 1000 || primData.height > 1000) {
+                            console.log('[PDF Import] Skipping large rectangle (likely page border):', primData.width, 'x', primData.height);
+                            return;
+                        }
+                        console.log('[PDF Import] Creating rectangle:', primData.x, primData.y, primData.width, primData.height);
                         primitive = await eda.sch_PrimitiveRectangle.create();
-                        await primitive.setState_X(primData.x);
-                        await primitive.setState_Y(primData.y);
+                        await primitive.setState_TopLeftX(primData.x);
+                        await primitive.setState_TopLeftY(primData.y);
                         await primitive.setState_Width(Math.abs(primData.width));
                         await primitive.setState_Height(Math.abs(primData.height));
                         await primitive.done();
                         break;
 
                     case 'Wire':
-                        if (!eda.sch_PrimitiveWire) {
-                            console.error('[PDF Import] sch_PrimitiveWire API not available');
+                        // Use Polygon instead of Wire for better compatibility
+                        if (!eda.sch_PrimitivePolygon) {
+                            console.error('[PDF Import] sch_PrimitivePolygon API not available');
                             return;
                         }
-                        // Convert points array to string format: "x1 y1 x2 y2 ..."
+                        // Polygon requires at least 2 points
+                        if (!primData.points || primData.points.length < 2) {
+                            console.warn('[PDF Import] Wire has insufficient points:', primData.points?.length);
+                            return;
+                        }
+
+                        // Calculate wire length to skip very short wires
+                        const p1 = primData.points[0];
+                        const p2 = primData.points[primData.points.length - 1];
+                        const length = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+
+                        if (length < 5) {
+                            console.log('[PDF Import] Skipping very short wire, length:', length);
+                            return;
+                        }
+
+                        // Use Polygon with setState_Line
+                        // Keep decimal precision, don't round to integers
                         const pointsStr = primData.points.map(p => `${p.x} ${p.y}`).join(' ');
-                        primitive = await eda.sch_PrimitiveWire.create();
-                        await primitive.setState_PointsString(pointsStr);
-                        await primitive.done();
+
+                        try {
+                            primitive = await eda.sch_PrimitivePolygon.create();
+                            await primitive.setState_Line(pointsStr);
+                            await primitive.setState_LineWidth(2);
+                            await primitive.done();
+                        } catch (error) {
+                            console.error('[PDF Import] Polygon creation failed with points:', pointsStr);
+                            throw error;
+                        }
                         break;
 
                     case 'Circle':

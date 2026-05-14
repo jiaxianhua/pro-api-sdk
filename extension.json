@@ -3,7 +3,7 @@
 	"uuid": "e6b973b894874000b67b20c263afa387",
 	"displayName": "PDF 导入原理图 / PDF Import to Schematic",
 	"description": "Import PDF files as vector graphics into schematic pages",
-	"version": "1.0.9",
+	"version": "1.1.0",
 	"publisher": "",
 	"engines": {
 		"eda": "^3.0.0"
