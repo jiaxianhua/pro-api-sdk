@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Import PDF to Schematic</title>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            font-size: 14px;
+            color: #333;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 460px;
+            margin: 0 auto;
+        }
+
+        .drop-area {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 40px 20px;
+            text-align: center;
+            background: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 20px;
+        }
+
+        .drop-area:hover {
+            border-color: #4CAF50;
+            background: #f9fff9;
+        }
+
+        .drop-area.drag-over {
+            border-color: #4CAF50;
+            background: #e8f5e9;
+            border-style: solid;
+        }
+
+        .drop-area.has-file {
+            border-color: #4CAF50;
+            background: #f1f8f4;
+        }
+
+        .drop-icon {
+            font-size: 48px;
+            color: #999;
+            margin-bottom: 10px;
+        }
+
+        .drop-text {
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .file-name {
+            color: #4CAF50;
+            font-weight: 500;
+            margin-top: 10px;
+            word-break: break-all;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .info-text {
+            color: #999;
+            font-size: 12px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .import-btn {
+            width: 100%;
+            padding: 12px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .import-btn:hover:not(:disabled) {
+            background: #45a049;
+        }
+
+        .import-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .progress {
+            display: none;
+            margin-top: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 6px;
+            border-left: 4px solid #2196F3;
+        }
+
+        .progress.show {
+            display: block;
+        }
+
+        .progress.success {
+            border-left-color: #4CAF50;
+        }
+
+        .progress.error {
+            border-left-color: #f44336;
+        }
+
+        .progress-text {
+            color: #666;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #2196F3;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="drop-area" id="dropArea">
+            <div class="drop-icon">📄</div>
+            <div class="drop-text" id="dropText">Drag and drop PDF file here, or click to select</div>
+            <div class="file-name" id="fileName" style="display: none;"></div>
+        </div>
+
+        <div class="info-text" id="infoText">Only first page will be imported</div>
+
+        <button class="import-btn" id="importBtn" disabled>Import PDF</button>
+
+        <div class="progress" id="progress">
+            <span class="spinner" id="spinner"></span>
+            <span class="progress-text" id="progressText">Ready</span>
+        </div>
+
+        <input type="file" id="fileInput" class="file-input" accept=".pdf">
+    </div>
+
+    <script type="module">
+        // Import pdf.js as ES6 module
+        const pdfjsLib = await import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.9.155/pdf.min.mjs');
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.9.155/pdf.worker.min.mjs';
+
+        // Make pdfjsLib available globally for the rest of the script
+        window.pdfjsLib = pdfjsLib;
+
+        // DOM elements
+        const dropArea = document.getElementById('dropArea');
+        const dropText = document.getElementById('dropText');
+        const fileName = document.getElementById('fileName');
+        const infoText = document.getElementById('infoText');
+        const importBtn = document.getElementById('importBtn');
+        const progress = document.getElementById('progress');
+        const progressText = document.getElementById('progressText');
+        const spinner = document.getElementById('spinner');
+        const fileInput = document.getElementById('fileInput');
+
+        let selectedFile = null;
+
+        // Get EDA object (try direct access first, then parent)
+        function getEDA() {
+            return (typeof eda !== 'undefined') ? eda : (window.parent && window.parent.eda);
+        }
+
+        // Wait for EasyEDA API to be ready
+        function waitForEDA() {
+            return new Promise((resolve) => {
+                const edaObj = getEDA();
+                console.log('[PDF Import] Checking EDA object:', !!edaObj);
+
+                if (edaObj) {
+                    console.log('[PDF Import] EDA API already available');
+                    resolve();
+                } else {
+                    console.log('[PDF Import] EDA API not ready, polling...');
+                    let attempts = 0;
+                    const checkInterval = setInterval(() => {
+                        attempts++;
+                        const eda = getEDA();
+                        console.log('[PDF Import] Poll attempt', attempts, '- eda:', !!eda);
+
+                        if (eda) {
+                            clearInterval(checkInterval);
+                            console.log('[PDF Import] EDA API became available after', attempts, 'attempts');
+                            resolve();
+                        }
+
+                        if (attempts > 50) {
+                            clearInterval(checkInterval);
+                            console.error('[PDF Import] Timeout waiting for EDA API after 5 seconds');
+                            resolve(); // Resolve anyway to see what happens
+                        }
+                    }, 100);
+                }
+            });
+        }
+
+        // Get i18n text helper
+        function getText(key) {
+            try {
+                const edaObj = getEDA();
+                if (!edaObj) {
+                    console.warn('[PDF Import] EDA not available for i18n, using key:', key);
+                    return key;
+                }
+                return edaObj.sys_I18n.text(key);
+            } catch (e) {
+                console.error('Failed to get i18n text:', key, e);
+                return key;
+            }
+        }
+
+        // Initialize UI text after EDA is ready
+        waitForEDA().then(() => {
+            dropText.textContent = getText('dragDropPdf');
+            infoText.textContent = getText('onlyFirstPage');
+            importBtn.textContent = getText('importPdf');
+        });
+
+        // File selection handlers - attach immediately
+        dropArea.addEventListener('click', function() {
+            fileInput.click();
+        });
+
+        dropArea.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            dropArea.classList.add('drag-over');
+        });
+
+        dropArea.addEventListener('dragleave', function() {
+            dropArea.classList.remove('drag-over');
+        });
+
+        dropArea.addEventListener('drop', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            dropArea.classList.remove('drag-over');
+
+            const files = e.dataTransfer.files;
+            if (files.length > 0 && files[0].type === 'application/pdf') {
+                handleFileSelect(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', function(e) {
+            if (e.target.files.length > 0) {
+                handleFileSelect(e.target.files[0]);
+            }
+        });
+
+        function handleFileSelect(file) {
+            selectedFile = file;
+            fileName.textContent = file.name;
+            fileName.style.display = 'block';
+            dropArea.classList.add('has-file');
+            importBtn.disabled = false;
+        }
+
+        // Show progress message
+        function showProgress(message, type = 'info') {
+            progress.classList.remove('success', 'error');
+            progress.classList.add('show');
+
+            if (type === 'success') {
+                progress.classList.add('success');
+                spinner.style.display = 'none';
+            } else if (type === 'error') {
+                progress.classList.add('error');
+                spinner.style.display = 'none';
+            } else {
+                spinner.style.display = 'inline-block';
+            }
+
+            progressText.textContent = message;
+        }
+
+        // Parse PDF and extract primitives
+        async function parsePdfToPrimitives(arrayBuffer) {
+            console.log('[PDF Import] Checking pdf.js library...');
+
+            if (!window.pdfjsLib) {
+                console.error('[PDF Import] pdf.js library not found');
+                throw new Error('pdf.js library not loaded');
+            }
+
+            const pdfjsLib = window.pdfjsLib;
+            console.log('[PDF Import] pdf.js library found, version:', pdfjsLib.version);
+
+            console.log('[PDF Import] Loading PDF document...');
+            const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+            const pdf = await loadingTask.promise;
+            console.log('[PDF Import] PDF loaded, pages:', pdf.numPages);
+
+            const page = await pdf.getPage(1); // Only first page
+            console.log('[PDF Import] Page 1 loaded');
+
+            const viewport = page.getViewport({ scale: 1.0 });
+            const pageWidth = viewport.width;
+            const pageHeight = viewport.height;
+            console.log('[PDF Import] Page dimensions:', pageWidth, 'x', pageHeight);
+
+            // Get operator list (vector commands)
+            console.log('[PDF Import] Getting operator list...');
+            const operatorList = await page.getOperatorList();
+            const { fnArray, argsArray } = operatorList;
+            console.log('[PDF Import] Operator list loaded, operations:', fnArray.length);
+
+            const primitives = [];
+            let currentPath = [];
+            let currentPoint = { x: 0, y: 0 };
+
+            // Scale factor: convert PDF points to schematic units
+            const scale = 10; // 1 PDF point = 10 schematic units (adjustable)
+
+            // Track operator statistics for debugging
+            const opStats = {};
+
+            // Parse operators
+            for (let i = 0; i < fnArray.length; i++) {
+                const fn = fnArray[i];
+                const args = argsArray[i];
+
+                // Track operator usage
+                const opName = Object.keys(pdfjsLib.OPS).find(key => pdfjsLib.OPS[key] === fn) || `Unknown(${fn})`;
+                opStats[opName] = (opStats[opName] || 0) + 1;
+
+                switch (fn) {
+                    case pdfjsLib.OPS.constructPath: {
+                        // constructPath contains an array of path operations
+                        // args[0] is an array of operations (OPS constants)
+                        // args[1] is an array of coordinates
+                        const ops = args[0];
+                        const coords = args[1];
+                        let coordIndex = 0;
+
+                        for (const op of ops) {
+                            switch (op) {
+                                case pdfjsLib.OPS.moveTo: {
+                                    const x = coords[coordIndex++];
+                                    const y = coords[coordIndex++];
+                                    currentPoint = transformCoordinates(x, y, pageHeight, scale);
+                                    if (currentPath.length > 0) {
+                                        // Finish previous path
+                                        if (currentPath.length > 1) {
+                                            primitives.push({
+                                                type: 'Wire',
+                                                points: [...currentPath]
+                                            });
+                                        }
+                                        currentPath = [];
+                                    }
+                                    currentPath.push({ ...currentPoint });
+                                    break;
+                                }
+                                case pdfjsLib.OPS.lineTo: {
+                                    const x = coords[coordIndex++];
+                                    const y = coords[coordIndex++];
+                                    currentPoint = transformCoordinates(x, y, pageHeight, scale);
+                                    currentPath.push({ ...currentPoint });
+                                    break;
+                                }
+                                case pdfjsLib.OPS.curveTo:
+                                case pdfjsLib.OPS.curveTo2:
+                                case pdfjsLib.OPS.curveTo3: {
+                                    // Bezier curves - skip control points, just use end point
+                                    coordIndex += 4; // Skip control points
+                                    const x = coords[coordIndex++];
+                                    const y = coords[coordIndex++];
+                                    currentPoint = transformCoordinates(x, y, pageHeight, scale);
+                                    currentPath.push({ ...currentPoint });
+                                    break;
+                                }
+                                case pdfjsLib.OPS.rectangle: {
+                                    const x = coords[coordIndex++];
+                                    const y = coords[coordIndex++];
+                                    const w = coords[coordIndex++];
+                                    const h = coords[coordIndex++];
+                                    const pos = transformCoordinates(x, y, pageHeight, scale);
+                                    primitives.push({
+                                        type: 'Rectangle',
+                                        x: pos.x,
+                                        y: pos.y,
+                                        width: Math.abs(w * scale),
+                                        height: Math.abs(h * scale)
+                                    });
+                                    break;
+                                }
+                                case pdfjsLib.OPS.closePath: {
+                                    // Close path by connecting to first point
+                                    if (currentPath.length > 0) {
+                                        currentPath.push({ ...currentPath[0] });
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        break;
+                    }
+
+                    case pdfjsLib.OPS.rectangle: {
+                        const [x, y, w, h] = args;
+                        const pos = transformCoordinates(x, y, pageHeight, scale);
+                        primitives.push({
+                            type: 'Rectangle',
+                            x: pos.x,
+                            y: pos.y - h * scale, // Adjust for height
+                            width: w * scale,
+                            height: h * scale
+                        });
+                        break;
+                    }
+
+                    case pdfjsLib.OPS.moveTo: {
+                        const [x, y] = args;
+                        currentPoint = transformCoordinates(x, y, pageHeight, scale);
+                        if (currentPath.length > 0) {
+                            // Finish previous path
+                            if (currentPath.length > 1) {
+                                primitives.push({
+                                    type: 'Wire',
+                                    points: [...currentPath]
+                                });
+                            }
+                            currentPath = [];
+                        }
+                        currentPath.push({ ...currentPoint });
+                        break;
+                    }
+
+                    case pdfjsLib.OPS.lineTo: {
+                        const [x, y] = args;
+                        currentPoint = transformCoordinates(x, y, pageHeight, scale);
+                        currentPath.push({ ...currentPoint });
+                        break;
+                    }
+
+                    case pdfjsLib.OPS.stroke:
+                    case pdfjsLib.OPS.fill:
+                    case pdfjsLib.OPS.eoFill:
+                    case pdfjsLib.OPS.fillStroke:
+                    case pdfjsLib.OPS.eoFillStroke:
+                    case pdfjsLib.OPS.closePath: {
+                        if (currentPath.length > 1) {
+                            primitives.push({
+                                type: 'Wire',
+                                points: [...currentPath]
+                            });
+                            currentPath = [];
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Log operator statistics
+            console.log('[PDF Import] Operator statistics:', opStats);
+            console.log('[PDF Import] Top 10 operators:', Object.entries(opStats).sort((a, b) => b[1] - a[1]).slice(0, 10));
+
+            // Get text content
+            console.log('[PDF Import] Getting text content...');
+            const textContent = await page.getTextContent();
+            console.log('[PDF Import] Text items found:', textContent.items.length);
+
+            for (const item of textContent.items) {
+                if (item.str.trim()) {
+                    const pos = transformCoordinates(
+                        item.transform[4],
+                        item.transform[5],
+                        pageHeight,
+                        scale
+                    );
+                    primitives.push({
+                        type: 'Text',
+                        x: pos.x,
+                        y: pos.y,
+                        text: item.str,
+                        fontSize: item.height * scale
+                    });
+                }
+            }
+
+            console.log('[PDF Import] Total primitives extracted:', primitives.length);
+            console.log('[PDF Import] Primitive types:', primitives.reduce((acc, p) => {
+                acc[p.type] = (acc[p.type] || 0) + 1;
+                return acc;
+            }, {}));
+
+            return primitives;
+        }
+
+        // Coordinate transformation: PDF to Schematic
+        function transformCoordinates(pdfX, pdfY, pageHeight, scale = 1) {
+            // PDF: bottom-left origin, Y-axis up
+            // Schematic: top-left origin, Y-axis down
+            const schX = pdfX * scale;
+            const schY = pdfY * scale;  // Don't flip Y - keep same orientation
+            return { x: schX, y: schY };
+        }
+
+        // Create schematic primitive
+        async function createPrimitive(primData) {
+            const eda = getEDA();
+
+            if (!eda) {
+                console.error('[PDF Import] EDA object not available');
+                return;
+            }
+
+            try {
+                let primitive;
+
+                switch (primData.type) {
+                    case 'Rectangle':
+                        if (!eda.sch_PrimitiveRectangle) {
+                            console.error('[PDF Import] sch_PrimitiveRectangle API not available');
+                            return;
+                        }
+                        primitive = await eda.sch_PrimitiveRectangle.create();
+                        await primitive.setState_X(primData.x);
+                        await primitive.setState_Y(primData.y);
+                        await primitive.setState_Width(Math.abs(primData.width));
+                        await primitive.setState_Height(Math.abs(primData.height));
+                        await primitive.done();
+                        break;
+
+                    case 'Wire':
+                        if (!eda.sch_PrimitiveWire) {
+                            console.error('[PDF Import] sch_PrimitiveWire API not available');
+                            return;
+                        }
+                        // Convert points array to string format: "x1 y1 x2 y2 ..."
+                        const pointsStr = primData.points.map(p => `${p.x} ${p.y}`).join(' ');
+                        primitive = await eda.sch_PrimitiveWire.create();
+                        await primitive.setState_PointsString(pointsStr);
+                        await primitive.done();
+                        break;
+
+                    case 'Circle':
+                        if (!eda.sch_PrimitiveCircle) {
+                            console.error('[PDF Import] sch_PrimitiveCircle API not available');
+                            return;
+                        }
+                        primitive = await eda.sch_PrimitiveCircle.create();
+                        await primitive.setState_X(primData.x);
+                        await primitive.setState_Y(primData.y);
+                        await primitive.setState_Radius(primData.radius);
+                        await primitive.done();
+                        break;
+
+                    case 'Text':
+                        if (!eda.sch_PrimitiveText) {
+                            console.error('[PDF Import] sch_PrimitiveText API not available');
+                            return;
+                        }
+                        primitive = await eda.sch_PrimitiveText.create();
+                        await primitive.setState_X(primData.x);
+                        await primitive.setState_Y(primData.y);
+                        await primitive.setState_Content(primData.text);
+                        await primitive.setState_FontSize(primData.fontSize || 12);
+                        await primitive.done();
+                        break;
+
+                    default:
+                        console.warn('[PDF Import] Unknown primitive type:', primData.type);
+                        return;
+                }
+
+                console.log('[PDF Import] Created primitive:', primData.type, 'at', primData.x, primData.y);
+            } catch (error) {
+                console.error('[PDF Import] Failed to create primitive:', primData.type, error);
+                console.error('[PDF Import] Primitive data:', primData);
+            }
+        }
+
+        // Create schematic page and import PDF
+        async function createSchematicPageWithPdf(primitives, pdfFileName) {
+            console.log('[PDF Import] Creating schematic page for:', pdfFileName);
+            const eda = getEDA();
+
+            // Get current schematic info
+            console.log('[PDF Import] Getting current schematic info...');
+            const currentInfo = await eda.dmt_Schematic.getCurrentSchematicPageInfo();
+            console.log('[PDF Import] Current schematic info:', currentInfo);
+
+            if (!currentInfo || !currentInfo.parentSchematicUuid) {
+                throw new Error(getText('noSchematicOpen'));
+            }
+
+            const schematicUuid = currentInfo.parentSchematicUuid;
+            console.log('[PDF Import] Schematic UUID:', schematicUuid);
+
+            // Create new page
+            showProgress(getText('creatingPage'));
+            console.log('[PDF Import] Creating new schematic page...');
+            const newPage = await eda.dmt_Schematic.createSchematicPage(schematicUuid);
+            console.log('[PDF Import] New page created:', newPage);
+            const pageUuid = newPage.uuid;
+
+            // Set page name (remove .pdf extension)
+            const pageName = pdfFileName.replace(/\.pdf$/i, '');
+            console.log('[PDF Import] Setting page name to:', pageName);
+            await eda.dmt_Schematic.modifySchematicPageName(pageUuid, pageName);
+
+            // Open the new page using schematic-specific API
+            console.log('[PDF Import] Opening new page...');
+            try {
+                await eda.dmt_Schematic.openSchematicPage(pageUuid);
+            } catch (e) {
+                console.warn('[PDF Import] Failed to open page, continuing anyway:', e);
+            }
+            console.log('[PDF Import] Page opened');
+
+            // Wait for page switch to complete (give EasyEDA time to update internal state)
+            console.log('[PDF Import] Waiting for page switch to stabilize...');
+            await new Promise(resolve => setTimeout(resolve, 500));
+            console.log('[PDF Import] Page switch stabilized');
+
+            // Add primitives
+            showProgress(getText('convertingGraphics'));
+            console.log('[PDF Import] Adding', primitives.length, 'primitives to page...');
+
+            for (let i = 0; i < primitives.length; i++) {
+                if (i % 10 === 0) {
+                    console.log('[PDF Import] Progress:', i, '/', primitives.length);
+                }
+                await createPrimitive(primitives[i]);
+            }
+
+            console.log('[PDF Import] All primitives added');
+
+            // Zoom to fit all primitives
+            try {
+                console.log('[PDF Import] Zooming to fit all primitives...');
+                await eda.dmt_EditorControl.zoomToAllPrimitives();
+                console.log('[PDF Import] Zoom completed');
+            } catch (e) {
+                console.warn('[PDF Import] Zoom failed (non-critical):', e);
+            }
+        }
+
+        // Import button handler
+        importBtn.addEventListener('click', async function() {
+            if (!selectedFile) return;
+
+            console.log('[PDF Import] Starting import process for:', selectedFile.name);
+            importBtn.disabled = true;
+
+            try {
+                // Wait for EDA to be ready before importing
+                console.log('[PDF Import] Waiting for EDA API...');
+                await waitForEDA();
+                console.log('[PDF Import] EDA API ready');
+
+                showProgress(getText('parsingPdf'));
+                console.log('[PDF Import] Reading PDF file...');
+
+                const arrayBuffer = await selectedFile.arrayBuffer();
+                console.log('[PDF Import] PDF file loaded, size:', arrayBuffer.byteLength, 'bytes');
+
+                console.log('[PDF Import] Parsing PDF to primitives...');
+                const primitives = await parsePdfToPrimitives(arrayBuffer);
+                console.log('[PDF Import] Parsed', primitives.length, 'primitives');
+
+                if (primitives.length === 0) {
+                    throw new Error(getText('invalidPdfFile'));
+                }
+
+                console.log('[PDF Import] Creating schematic page...');
+                await createSchematicPageWithPdf(primitives, selectedFile.name);
+
+                showProgress(getText('importSuccess'), 'success');
+                console.log('[PDF Import] Import completed successfully');
+                getEDA().sys_Message.showToastMessage(getText('importSuccess'));
+
+                // Close dialog after 2 seconds
+                setTimeout(() => {
+                    getEDA().sys_IFrame.hideIFrame('pdf-import-dialog');
+                }, 2000);
+
+            } catch (error) {
+                console.error('[PDF Import] Import failed:', error);
+                console.error('[PDF Import] Error stack:', error.stack);
+                showProgress(getText('importFailed') + ': ' + error.message, 'error');
+                getEDA().sys_Message.showToastMessage(getText('importFailed'));
+                importBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

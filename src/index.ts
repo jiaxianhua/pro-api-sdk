@@ -21,3 +21,17 @@ export function about(): void {
 		eda.sys_I18n.text('About'),
 	);
 }
+
+export async function importPdfToSchematic(): Promise<void> {
+	await eda.sys_IFrame.openIFrame(
+		'/iframe/pdf-import.html',
+		500,
+		400,
+		'pdf-import-dialog',
+		{
+			title: eda.sys_I18n.text('selectPdfFile'),
+			minimizeButton: true,
+			minimizeStyle: 'collapsed',
+		},
+	);
+}

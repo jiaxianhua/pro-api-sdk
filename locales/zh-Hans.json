@@ -1,4 +1,16 @@
 {
 	"About": "关于",
-	"EasyEDA extension SDK v": "嘉立创EDA 扩展 SDK v${1}"
+	"EasyEDA extension SDK v": "嘉立创EDA 扩展 SDK v${1}",
+	"selectPdfFile": "选择 PDF 文件",
+	"dragDropPdf": "拖拽 PDF 文件到此处，或点击选择",
+	"importPdf": "导入 PDF",
+	"importing": "正在导入...",
+	"parsingPdf": "正在解析 PDF...",
+	"creatingPage": "正在创建图页...",
+	"convertingGraphics": "正在转换图形...",
+	"importSuccess": "PDF 导入成功！",
+	"importFailed": "PDF 导入失败",
+	"onlyFirstPage": "仅导入第一页",
+	"noSchematicOpen": "请先打开一个原理图",
+	"invalidPdfFile": "无效的 PDF 文件"
 }

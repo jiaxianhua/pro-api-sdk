@@ -1,9 +1,9 @@
 {
-	"name": "your-extension-name",
-	"uuid": "",
-	"displayName": "你的扩展名称/Your Extension Name",
-	"description": "",
-	"version": "1.0.0",
+	"name": "pdf-import-schematic",
+	"uuid": "e6b973b894874000b67b20c263afa387",
+	"displayName": "PDF 导入原理图 / PDF Import to Schematic",
+	"description": "Import PDF files as vector graphics into schematic pages",
+	"version": "1.0.9",
 	"publisher": "",
 	"engines": {
 		"eda": "^3.0.0"
@@ -48,6 +48,17 @@
 						"id": "About",
 						"title": "About...",
 						"registerFn": "about"
+					}
+				]
+			},
+			{
+				"id": "pdf-import-menu",
+				"title": "extensionJson.pdfImportMenu",
+				"menuItems": [
+					{
+						"id": "import-pdf-to-page",
+						"title": "extensionJson.importPdfToPage",
+						"registerFn": "importPdfToSchematic"
 					}
 				]
 			}

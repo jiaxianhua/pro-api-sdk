@@ -1,4 +1,16 @@
 {
 	"About": "About",
-	"EasyEDA extension SDK v": "EasyEDA extension SDK v${1}"
+	"EasyEDA extension SDK v": "EasyEDA extension SDK v${1}",
+	"selectPdfFile": "Select PDF File",
+	"dragDropPdf": "Drag and drop PDF file here, or click to select",
+	"importPdf": "Import PDF",
+	"importing": "Importing...",
+	"parsingPdf": "Parsing PDF...",
+	"creatingPage": "Creating page...",
+	"convertingGraphics": "Converting graphics...",
+	"importSuccess": "PDF imported successfully!",
+	"importFailed": "PDF import failed",
+	"onlyFirstPage": "Only first page will be imported",
+	"noSchematicOpen": "Please open a schematic first",
+	"invalidPdfFile": "Invalid PDF file"
 }
